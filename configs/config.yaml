@@ -1,0 +1,62 @@
+# ===== 模型配置 =====
+# 问：为什么写在这里？
+# 答：如果以后想换模型（比如换成 qwen3:8b），只需要改这一行，不用翻代码
+model:
+  base_model: "gemma4-e4b"           # 你电脑上 Ollama 已经装好的模型
+  embedding_model: "nomic-embed-text"  # 用于向量检索的嵌入模型
+
+  # 三个 Agent 各自的 LoRA 配置
+  # 问：为什么 rank 不同？
+  # 答：rank 越大，可学习的参数越多，能力越强，但显存占用也越大
+  #     Forward(8) 最简单，Creative(16) 最复杂，所以 rank 递增
+  lora:
+    forward:                        # 前瞻推理：预测长期影响
+      r: 8
+      alpha: 16
+      target_modules: ["q_proj", "v_proj", "k_proj", "o_proj"]
+      dropout: 0.05
+
+    critical:                       # 批判推理：找逻辑漏洞
+      r: 12
+      alpha: 24
+      target_modules: ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj"]
+      dropout: 0.05
+
+    creative:                       # 创造推理：跨领域类比
+      r: 16
+      alpha: 32
+      target_modules: ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+      dropout: 0.1
+
+# ===== Ollama 配置 =====
+# 问：为什么需要配置 URL？
+# 答：Ollama 默认跑在 localhost:11434，但如果以后部署到服务器，地址会变
+ollama:
+  base_url: "http://localhost:11434"
+  timeout: 120                     # 秒，模型思考慢的话给够时间
+  num_ctx: 4096                    # 上下文窗口，4B 模型支持这个大小
+
+# ===== 协调器配置 =====
+# 问：为什么不同问题用不同 Agent？
+# 答：简单问题只用批判 Agent 就够了，复杂问题才需要三个 Agent 一起讨论
+#     这样省时间（每多一个 Agent 就多一次模型调用）
+coordinator:
+  routing:
+    simple_logical:
+      agents: ["critical"]
+      rounds: 1
+    complex_reasoning:
+      agents: ["forward", "critical", "creative"]
+      rounds: 3
+    creative_problem:
+      agents: ["creative", "critical"]
+      rounds: 2
+    default:
+      agents: ["forward", "critical", "creative"]
+      rounds: 3
+
+  # 投票权重：批判 Agent 权重高，因为它专门找错误
+  vote_weights:
+    forward: 1.0
+    critical: 1.2
+    creative: 0.8

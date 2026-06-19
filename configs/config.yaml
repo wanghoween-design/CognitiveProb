@@ -2,7 +2,7 @@
 # 问：为什么写在这里？
 # 答：如果以后想换模型（比如换成 qwen3:8b），只需要改这一行，不用翻代码
 model:
-  base_model: "gemma4-e4b"           # 你电脑上 Ollama 已经装好的模型
+  base_model: "qwen3:4b"           # 你电脑上 Ollama 已经装好的模型
   embedding_model: "nomic-embed-text"  # 用于向量检索的嵌入模型
 
   # 三个 Agent 各自的 LoRA 配置
@@ -60,3 +60,10 @@ coordinator:
     forward: 1.0
     critical: 1.2
     creative: 0.8
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "postgres"
+  password: "postgres123"
+  name: "cognitive_probe"

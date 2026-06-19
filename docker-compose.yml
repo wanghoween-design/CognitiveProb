@@ -1,0 +1,27 @@
+
+services:
+  # ====== PostgreSQL ======
+  postgres:
+    image: postgres:16
+    container_name: cognitive_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+      POSTGRES_DB: cognitive_probe
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # ====== Redis ======
+  redis:
+    image: redis:7
+    container_name: cognitive_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:

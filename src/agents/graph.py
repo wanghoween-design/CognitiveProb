@@ -1,5 +1,6 @@
 from typing import TypedDict
 from langgraph.graph import StateGraph, END
+from langgraph.types import Send
 import ollama
 import re
 
@@ -8,23 +9,26 @@ from src.config import config
 class AgentState(TypedDict):
     question: str
     question_type: str           # coordinator 判断的问题类型
-    coordinator_answer: str      # 简单问题的直接回答
     forward_answer: str
     critical_answer: str
     creative_answer: str
+    debate_critique: str         # 辩论 Round 1：批判 Agent 的质疑
+    forward_revised: str         # 辩论 Round 2：前瞻 Agent 修正后的回答
+    creative_revised: str        # 辩论 Round 2：创造 Agent 修正后的回答
     final_answer: str
 
 
 def call_llm(prompt: str) -> str:
     """调用 Ollama 模型，返回清洗后的回答"""
-    client = ollama.Client(host=config["ollama"]["base_url"])
-    response = client.chat(
-        model=config["model"]["base_model"],
-        messages=[{"role": "user", "content": prompt}]
-    )
-    answer = response["message"]["content"]
-    
-    return answer
+    try:
+        client = ollama.Client(host=config["ollama"]["base_url"])
+        response = client.chat(
+            model=config["model"]["base_model"],
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response["message"]["content"]
+    except Exception as e:
+        return f"[模型调用失败: {e}]"
 
 
 def coordinator(state: AgentState) -> dict:
@@ -53,36 +57,33 @@ def coordinator(state: AgentState) -> dict:
     }
     q_type = type_map.get(question_type, "complex_reasoning")
 
-    # 简单问候：直接回答
-    if q_type == "simple_greeting":
-        answer = call_llm(f"请用一句简短友好的话回答：{question}")
-        return {"question_type": q_type, "coordinator_answer": answer}
-
-    # 其他类型：交给后续 Agent 处理
-    return {"question_type": q_type, "coordinator_answer": ""}
+    return {"question_type": q_type}
 
 
-def route_by_type(state: AgentState) -> str:
-    """根据问题类型决定路由"""
+def dispatcher(state: AgentState) -> list[Send]:
+    """根据问题类型分发任务，复杂问题用 Send 并行执行多个 Agent"""
     q_type = state["question_type"]
+
     if q_type == "simple_greeting":
-        return "direct_answer"
+        return [Send("direct_answer", state)]
+
     elif q_type == "simple_factual":
-        return "critical"          # 简单问题只用批判 Agent
+        # 简单事实：只用批判 Agent
+        return [Send("critical", state)]
+
     else:
-        return "forward"           # 复杂问题三个 Agent 全用
-
-
-def route_after_critical(state: AgentState) -> str:
-    """critical 之后：简单事实去 aggregator，复杂推理去 creative"""
-    if state["question_type"] == "simple_factual":
-        return "aggregator"
-    return "creative"
+        # 复杂推理：三个 Agent 同时并行执行
+        return [
+            Send("forward", state),
+            Send("critical", state),
+            Send("creative", state),
+        ]
 
 
 def direct_answer(state: AgentState) -> dict:
-    """简单问题的直接回答（来自 coordinator）"""
-    return {"final_answer": state["coordinator_answer"]}
+    """简单问候的直接回答"""
+    answer = call_llm(f"请用一句简短友好的话回答：{state['question']}")
+    return {"final_answer": answer}
 
 
 def forward_agent(state: AgentState) -> dict:
@@ -121,31 +122,110 @@ def creative_agent(state: AgentState) -> dict:
 
 def aggregator(state: AgentState) -> dict:
     """综合 Agent 的回答，生成最终总结"""
-    forward = state.get("forward_answer", "")
+    # 优先用修正后的回答，没有则用原始回答
+    forward = state.get("forward_revised") or state.get("forward_answer", "")
     critical = state.get("critical_answer", "")
-    creative = state.get("creative_answer", "")
-
-    # 根据有哪些 Agent 回答来构建 prompt
-    sections = ""
-    if forward:
-        sections += f"\n--- 前瞻分析 ---\n{forward}\n"
-    if critical:
-        sections += f"\n--- 批判分析 ---\n{critical}\n"
-    if creative:
-        sections += f"\n--- 创造性分析 ---\n{creative}\n"
+    creative = state.get("creative_revised") or state.get("creative_answer", "")
 
     prompt = f"""你是一个综合分析师。请阅读以下分析，然后写出一个综合总结。
 
 原始问题：{state["question"]}
-{sections}
+
+--- 前瞻分析 ---
+{forward}
+
+--- 批判分析 ---
+{critical}
+
+--- 创造性分析 ---
+{creative}
 
 请根据以上分析，写一个综合总结，要求：
 1. 提取最有价值的观点
-2. 如果有多个分析，找出共识点和分歧点
+2. 找出三个分析的共识点和分歧点
 3. 给出你自己的最终判断
 4. 控制在 500 字以内"""
     final = call_llm(prompt)
     return {"final_answer": final}
+
+
+
+# ====== 辩论-共识协议 ======
+
+def debate_reviewer(state: AgentState) -> dict:
+    """辩论 Round 1：批判 Agent 审视前瞻和创造的分析，提出质疑"""
+    forward = state.get("forward_answer", "")
+    creative = state.get("creative_answer", "")
+
+    prompt = f"""你是一个批判性审查专家。请审视以下两个分析，找出它们的逻辑漏洞、事实错误和不合理的假设。
+
+原始问题：{state["question"]}
+
+--- 前瞻分析 ---
+{forward}
+
+--- 创造性分析 ---
+{creative}
+
+请指出这两个分析中：
+1. 哪些结论缺乏证据支持
+2. 哪些推理存在逻辑漏洞
+3. 哪些假设可能不成立
+4. 用中文回答，控制在 300 字以内。"""
+    critique = call_llm(prompt)
+    return {"debate_critique": critique}
+
+
+def forward_reviser(state: AgentState) -> dict:
+    """辩论 Round 2：前瞻 Agent 根据批判质疑修正自己的观点"""
+    original = state.get("forward_answer", "")
+    critique = state.get("debate_critique", "")
+
+    prompt = f"""你是一个前瞻性推理专家。你之前的分析受到了批判性审查，请根据质疑修正你的观点。
+
+原始问题：{state["question"]}
+
+--- 你之前的分析 ---
+{original}
+
+--- 批判质疑 ---
+{critique}
+
+请修正你的分析，保留正确的部分，修正错误的部分，用中文回答，控制在 500 字以内。"""
+    revised = call_llm(prompt)
+    return {"forward_revised": revised}
+
+
+def creative_reviser(state: AgentState) -> dict:
+    """辩论 Round 2：创造 Agent 根据批判质疑修正自己的观点"""
+    original = state.get("creative_answer", "")
+    critique = state.get("debate_critique", "")
+
+    prompt = f"""你是一个创造性推理专家。你之前的分析受到了批判性审查，请根据质疑修正你的观点。
+
+原始问题：{state["question"]}
+
+--- 你之前的分析 ---
+{original}
+
+--- 批判质疑 ---
+{critique}
+
+请修正你的分析，保留创新视角，但修正其中不合理的部分，用中文回答，控制在 500 字以内。"""
+    revised = call_llm(prompt)
+    return {"creative_revised": revised}
+
+
+def sync_point(state: AgentState) -> dict:
+    """汇聚节点：等待所有并行 Agent 完成，统一路由"""
+    return {}
+
+
+def route_after_sync(state: AgentState) -> str:
+    """汇聚后路由：简单事实直接汇总，复杂推理进入辩论"""
+    if state["question_type"] == "simple_factual":
+        return "aggregator"
+    return "debate_reviewer"
 
 
 # 构建图
@@ -157,40 +237,39 @@ graph.add_node("direct_answer", direct_answer)
 graph.add_node("forward", forward_agent)
 graph.add_node("critical", critical_agent)
 graph.add_node("creative", creative_agent)
+graph.add_node("sync_point", sync_point)
 graph.add_node("aggregator", aggregator)
+graph.add_node("debate_reviewer", debate_reviewer)
+graph.add_node("forward_reviser", forward_reviser)
+graph.add_node("creative_reviser", creative_reviser)
 
 # 设置入口为 coordinator
 graph.set_entry_point("coordinator")
 
-# coordinator 之后的条件路由
+# coordinator → dispatcher（用 Send 并行分发）
+graph.add_conditional_edges("coordinator", dispatcher)
+
+# 三个 Agent 完成后 → 汇聚节点（等待所有并行任务完成）
+graph.add_edge("forward", "sync_point")
+graph.add_edge("critical", "sync_point")
+graph.add_edge("creative", "sync_point")
+
+# 汇聚后统一路由
+graph.add_conditional_edges("sync_point", route_after_sync)
+
+# 辩论 Round 1：批判审查
+# debate_reviewer 完成后，前瞻和创造同时修正（并行）
 graph.add_conditional_edges(
-    "coordinator",
-    route_by_type,
-    {
-        "direct_answer": "direct_answer",   # 简单问候 → 直接回答
-        "critical": "critical",             # 简单事实 → 批判 Agent
-        "forward": "forward",               # 复杂推理 → 前瞻 Agent
-    }
+    "debate_reviewer",
+    lambda s: [Send("forward_reviser", s), Send("creative_reviser", s)]
 )
 
-# 简单问候 → 直接回答 → 结束
+# 辩论 Round 2：修正完成后 → 汇总
+graph.add_edge("forward_reviser", "aggregator")
+graph.add_edge("creative_reviser", "aggregator")
+
+# 直接回答 → 结束
 graph.add_edge("direct_answer", END)
-
-# 复杂推理：前瞻 → 批判
-graph.add_edge("forward", "critical")
-
-# 批判之后：根据问题类型路由
-graph.add_conditional_edges(
-    "critical",
-    route_after_critical,
-    {
-        "creative": "creative",             # 复杂推理 → 创造 Agent
-        "aggregator": "aggregator",         # 简单事实 → 直接汇总
-    }
-)
-
-# 创造 → 汇总 → 结束
-graph.add_edge("creative", "aggregator")
 graph.add_edge("aggregator", END)
 
 # 编译

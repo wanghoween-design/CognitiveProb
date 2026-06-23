@@ -238,6 +238,7 @@ graph.add_node("forward", forward_agent)
 graph.add_node("critical", critical_agent)
 graph.add_node("creative", creative_agent)
 graph.add_node("sync_point", sync_point)
+graph.add_node("sync_point_2", sync_point)
 graph.add_node("aggregator", aggregator)
 graph.add_node("debate_reviewer", debate_reviewer)
 graph.add_node("forward_reviser", forward_reviser)
@@ -264,9 +265,10 @@ graph.add_conditional_edges(
     lambda s: [Send("forward_reviser", s), Send("creative_reviser", s)]
 )
 
-# 辩论 Round 2：修正完成后 → 汇总
-graph.add_edge("forward_reviser", "aggregator")
-graph.add_edge("creative_reviser", "aggregator")
+# 辩论 Round 2：修正完成后 → 汇聚 → 汇总
+graph.add_edge("forward_reviser", "sync_point_2")
+graph.add_edge("creative_reviser", "sync_point_2")
+graph.add_edge("sync_point_2", "aggregator")
 
 # 直接回答 → 结束
 graph.add_edge("direct_answer", END)

@@ -23,3 +23,5 @@ CodeGuard/
 CognitiveProbe/
 learning/
 test_docker.py
+models
+data

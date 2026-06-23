@@ -284,8 +284,10 @@ graph.py（LangGraph 工作流）
 
 ### 待开发
 
-- [ ] LoRA 认知注入训练（下载模型中）
-- [ ] 训练脚本编写
+- [ ] LoRA 训练脚本编写（train_forward.py）
+- [ ] Forward Agent LoRA 训练
+- [ ] Critical Agent LoRA 训练
+- [ ] Creative Agent LoRA 训练
 - [ ] LoRA Adapter 集成到 LangGraph
 - [ ] Milvus 向量检索集成
 - [ ] Langfuse 可观测性

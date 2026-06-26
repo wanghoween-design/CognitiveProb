@@ -1,10 +1,10 @@
 from typing import TypedDict
 from langgraph.graph import StateGraph, END
 from langgraph.types import Send
-import ollama
 import re
 
 from src.config import config
+from src.agents.lora_inference import generate_lora, generate_base
 
 class AgentState(TypedDict):
     question: str
@@ -18,15 +18,20 @@ class AgentState(TypedDict):
     final_answer: str
 
 
-def call_llm(prompt: str) -> str:
-    """调用 Ollama 模型，返回清洗后的回答"""
+def call_llm(prompt: str, use_lora: str = None) -> str:
+    """调用模型生成回答
+
+    Args:
+        prompt: 提示词
+        use_lora: None = 基座模型（无 LoRA）
+                  "forward" = 基座 + forward LoRA（前瞻推理）
+                  "critical" / "creative" = 后续训练完成后启用
+    """
     try:
-        client = ollama.Client(host=config["ollama"]["base_url"])
-        response = client.chat(
-            model=config["model"]["base_model"],
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response["message"]["content"]
+        if use_lora:
+            return generate_lora(prompt, use_lora)
+        else:
+            return generate_base(prompt)
     except Exception as e:
         return f"[模型调用失败: {e}]"
 
@@ -92,7 +97,7 @@ def forward_agent(state: AgentState) -> dict:
     prompt = f"""你是一个前瞻性推理专家。请预测以下问题的长期影响和连锁反应。
 问题：{question}
 请从短期、中期、长期三个维度分析，用中文给出你的回答，字数限制在500字以内。"""
-    answer = call_llm(prompt)
+    answer = call_llm(prompt, use_lora="forward")
     return {"forward_answer": answer}
 
 
@@ -192,7 +197,7 @@ def forward_reviser(state: AgentState) -> dict:
 {critique}
 
 请修正你的分析，保留正确的部分，修正错误的部分，用中文回答，控制在 500 字以内。"""
-    revised = call_llm(prompt)
+    revised = call_llm(prompt, use_lora="forward")
     return {"forward_revised": revised}
 
 

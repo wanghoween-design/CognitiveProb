@@ -37,6 +37,7 @@ _docs/
 .claude/
 CodeGuard/
 CognitiveProbe/
+learning/
 test_docker.py
 models
 data

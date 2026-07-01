@@ -109,7 +109,7 @@ def critical_agent(state: AgentState) -> dict:
 问题：{question}
 
 请质疑假设、找反例、识别逻辑谬误，用中文给出你的分析，字数限制在500字以内。"""
-    answer = call_llm(prompt)
+    answer = call_llm(prompt, use_lora="critical")
     return {"critical_answer": answer}
 
 
@@ -121,7 +121,7 @@ def creative_agent(state: AgentState) -> dict:
 问题：{question}
 
 请用其他领域的案例来类比，用中文给出创新视角的回答。虽然是按照其他领域的类比，但是最后的落脚点一定要回归到问题本身，字数限制在500字以内。"""
-    answer = call_llm(prompt)
+    answer = call_llm(prompt, use_lora="creative")
     return {"creative_answer": answer}
 
 
@@ -132,24 +132,23 @@ def aggregator(state: AgentState) -> dict:
     critical = state.get("critical_answer", "")
     creative = state.get("creative_revised") or state.get("creative_answer", "")
 
-    prompt = f"""你是一个综合分析师。请阅读以下分析，然后写出一个综合总结。
+    prompt = f"""请综合以下三个分析，写一个简洁的最终结论。
 
 原始问题：{state["question"]}
 
---- 前瞻分析 ---
-{forward}
+前瞻分析（提取关键点）：{forward[:400]}
 
---- 批判分析 ---
-{critical}
+批判分析（提取关键点）：{critical[:400]}
 
---- 创造性分析 ---
-{creative}
+创造分析（提取关键点）：{creative[:400]}
 
-请根据以上分析，写一个综合总结，要求：
-1. 提取最有价值的观点
-2. 找出三个分析的共识点和分歧点
-3. 给出你自己的最终判断
-4. 控制在 500 字以内"""
+要求：
+1. 只输出一段话，不超过 200 字
+2. 不要用"###"标题或编号
+3. 直接给出结论，不要说"综合分析"、"总结如下"等引导语
+4. 提取三个分析的共识，给出最终判断
+
+最终结论："""
     final = call_llm(prompt)
     return {"final_answer": final}
 
@@ -162,22 +161,20 @@ def debate_reviewer(state: AgentState) -> dict:
     forward = state.get("forward_answer", "")
     creative = state.get("creative_answer", "")
 
-    prompt = f"""你是一个批判性审查专家。请审视以下两个分析，找出它们的逻辑漏洞、事实错误和不合理的假设。
+    prompt = f"""你是一个批判性审查专家。请审视以下两个分析，找出逻辑漏洞。
 
 原始问题：{state["question"]}
 
---- 前瞻分析 ---
-{forward}
+前瞻分析（摘要）：{forward[:400]}
 
---- 创造性分析 ---
-{creative}
+创造分析（摘要）：{creative[:400]}
 
-请指出这两个分析中：
+请指出：
 1. 哪些结论缺乏证据支持
 2. 哪些推理存在逻辑漏洞
 3. 哪些假设可能不成立
-4. 用中文回答，控制在 300 字以内。"""
-    critique = call_llm(prompt)
+用中文回答，200-300字。"""
+    critique = call_llm(prompt, use_lora="critical")
     return {"debate_critique": critique}
 
 
@@ -186,17 +183,15 @@ def forward_reviser(state: AgentState) -> dict:
     original = state.get("forward_answer", "")
     critique = state.get("debate_critique", "")
 
-    prompt = f"""你是一个前瞻性推理专家。你之前的分析受到了批判性审查，请根据质疑修正你的观点。
+    prompt = f"""你是一个前瞻性推理专家。请根据批判质疑修正你的分析。
 
 原始问题：{state["question"]}
 
---- 你之前的分析 ---
-{original}
+你之前的分析（摘要）：{original[:300]}
 
---- 批判质疑 ---
-{critique}
+批判质疑（关键点）：{critique[:300]}
 
-请修正你的分析，保留正确的部分，修正错误的部分，用中文回答，控制在 500 字以内。"""
+请修正分析，保留正确的部分，修正错误的部分，用中文回答，200-400字。"""
     revised = call_llm(prompt, use_lora="forward")
     return {"forward_revised": revised}
 
@@ -206,18 +201,16 @@ def creative_reviser(state: AgentState) -> dict:
     original = state.get("creative_answer", "")
     critique = state.get("debate_critique", "")
 
-    prompt = f"""你是一个创造性推理专家。你之前的分析受到了批判性审查，请根据质疑修正你的观点。
+    prompt = f"""你是一个创造性推理专家。请根据批判质疑修正你的分析。
 
 原始问题：{state["question"]}
 
---- 你之前的分析 ---
-{original}
+你之前的分析（摘要）：{original[:300]}
 
---- 批判质疑 ---
-{critique}
+批判质疑（关键点）：{critique[:300]}
 
-请修正你的分析，保留创新视角，但修正其中不合理的部分，用中文回答，控制在 500 字以内。"""
-    revised = call_llm(prompt)
+请修正分析，保留创新视角，修正不合理部分，用中文回答，200-400字。"""
+    revised = call_llm(prompt, use_lora="creative")
     return {"creative_revised": revised}
 
 

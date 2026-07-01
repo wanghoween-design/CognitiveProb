@@ -77,7 +77,7 @@ print(f"  output: {dataset[0]['output'][:100]}...")
 
 training_args = TrainingArguments(
     output_dir="./adapters/forward_lora",    # 训练结果保存到这里
-    num_train_epochs=5,                       # 训练 5 轮（在 3 轮基础上加 2 轮，看 loss 是否继续下降）
+    num_train_epochs=4,                       # 训练 4 轮（Epoch 4.0 达到最优，之后过拟合）
     per_device_train_batch_size=1,            # RTX 3060 6GB：每次只喂 1 条数据
     gradient_accumulation_steps=16,            # 累积 16 步 = 等效 batch_size=16
     learning_rate=2e-4,                       # 学习率，太大模型学不好，太小学得慢 QLoRA 推荐值，太大模型会"忘记"原来的知识

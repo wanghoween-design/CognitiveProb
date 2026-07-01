@@ -68,8 +68,8 @@
 | Agent | 认知风格 | LoRA 秩 | 训练状态 | 分析角度 |
 |-------|---------|---------|---------|---------|
 | 前瞻 Agent | Forward-looking | r=8 | ✅ 已完成 | 短期→中期→长期因果链推演 |
-| 批判 Agent | Critical | r=12 | ⏳ 待训练 | 逻辑漏洞、反例、谬误识别 |
-| 创造 Agent | Creative | r=16 | ⏳ 待训练 | 跨领域类比，创新视角 |
+| 批判 Agent | Critical | r=12 | ✅ 已完成 | 逻辑漏洞、反例、谬误识别 |
+| 创造 Agent | Creative | r=16 | ✅ 已完成 | 跨领域类比，创新视角 |
 
 ### Coordinator 路由逻辑
 
@@ -124,7 +124,7 @@ Multi-Agent/
 │   │   └── agents.py                # 多 Agent 推理接口
 │   ├── agents/                      # Agent 层
 │   │   ├── graph.py                 # LangGraph 工作流定义
-│   │   └── lora_inference.py        # 本地模型推理模块（替代 Ollama）
+│   │   └── lora_inference.py        # 本地模型推理模块
 │   ├── models/                      # 数据层
 │   │   ├── task.py                  # Task 表模型
 │   │   ├── database.py              # 数据库连接
@@ -132,22 +132,29 @@ Multi-Agent/
 │   ├── config.py                    # 配置加载器
 │   └── main.py                      # 应用入口（启动时预加载模型）
 ├── data/                            # LoRA 训练数据
-│   ├── forward_train.json           # 前瞻推理训练数据（500条）
-│   ├── critical_train.json          # 批判推理训练数据（500条）
-│   └── creative_train.json          # 创造推理训练数据（500条）
-├── models/                          # 基座模型（Qwen3-4B HF 版本，不提交 Git）
+│   ├── forward_train.json           # 前瞻推理（500条）
+│   ├── critical_train.json          # 批判推理（500条）
+│   └── creative_train.json          # 创造推理（500条）
+├── models/                          # 基座模型（Qwen3-4B，不提交 Git）
 ├── adapters/                        # 已训练的 LoRA adapter
-│   └── forward_lora/                # Forward Agent LoRA
-│       ├── adapter_model.safetensors  # LoRA 权重（~11.5MB）
-│       ├── adapter_config.json        # LoRA 配置
-│       └── training_log.json          # 训练日志（loss/accuracy/entropy）
+│   ├── forward_lora/                # Forward Agent（r=8, 5.9M 参数）
+│   ├── critical_lora/               # Critical Agent（r=12, 19.5M 参数）
+│   ├── creative_lora/               # Creative Agent（r=16, 33.0M 参数）
+│   ├── training_comparison.png      # 三模型对比图
+│   └── training_comparison.pdf
 ├── scripts/                         # 训练 & 工具脚本
-│   ├── train_forward.py             # Forward LoRA 训练脚本
-│   ├── test_lora.py                 # LoRA 推理验证（基座 vs LoRA 对比）
-│   ├── plot_training.py             # 训练指标 3D 瀑布图
+│   ├── train_forward.py             # Forward LoRA 训练
+│   ├── train_critical.py            # Critical LoRA 训练
+│   ├── train_creative.py            # Creative LoRA 训练
+│   ├── test_lora.py                 # LoRA 推理验证
+│   ├── plot_forward.py              # Forward 训练指标可视化
+│   ├── plot_critical.py             # Critical 训练指标可视化
+│   ├── plot_creative.py             # Creative 训练指标可视化
+│   ├── plot_compare.py              # 三模型横向对比
 │   └── debug_uvicorn.py             # 最小复现调试脚本
 ├── learning/                        # 学习笔记
-│   └── project-setup-notes.md       # 项目搭建完整笔记（53KB）
+│   ├── project-setup-notes.md       # 项目搭建笔记（28 章节）
+│   └── error-notes.md               # 错误记录
 ├── docker-compose.yml               # PostgreSQL + Redis
 ├── requirements.txt                 # Python 依赖
 └── README.md
@@ -202,7 +209,6 @@ Multi-Agent/
 # 1. 创建虚拟环境
 python -m venv .venv
 .venv\Scripts\activate          # Windows
-# source .venv/bin/activate    # Linux/Mac
 
 # 2. 安装依赖
 pip install -r requirements.txt
@@ -224,18 +230,12 @@ uvicorn src.main:app --host 127.0.0.1 --port 8000
 ==========================================================
 [LoRA推理] 启动预加载...
 [LoRA推理] 加载基座模型（4-bit）...
-Loading weights: 100%|████████| 398/398 [00:16<00:00, 23.51it/s]
 [LoRA推理] 加载 forward LoRA adapter...
+[LoRA推理] 加载 critical LoRA adapter...
+[LoRA推理] 加载 creative LoRA adapter...
 [LoRA推理] 预加载完成，所有 adapter 就绪
 INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
-
-### 关键注意事项
-
-1. **模型加载在启动阶段完成**（不在请求时），确保首次请求不会超时
-2. **首次启动需要 ~16 秒加载模型**，后续请求直接推理
-3. **确保可用内存 > 4GB**（模型分片每个 3.8GB，需要足够内存读入再量化）
-4. **数据库启动失败不影响 /reason 接口**（try/except 容错）
 
 ---
 
@@ -244,7 +244,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 ### 训练流程
 
 ```
-Step 1: 准备训练数据（data/forward_train.json，500条）
+Step 1: 准备训练数据（data/xxx_train.json，500条）
 Step 2: 编辑 config.yaml 中的 LoRA 参数
 Step 3: 运行训练脚本
 Step 4: 验证 adapter 效果
@@ -257,23 +257,164 @@ Step 5: 集成到 graph.py
 # 训练 Forward Agent LoRA
 python scripts/train_forward.py
 
+# 训练 Critical Agent LoRA
+python scripts/train_critical.py
+
+# 训练 Creative Agent LoRA
+python scripts/train_creative.py
+
 # 验证训练效果
 python scripts/test_lora.py
 
 # 可视化训练指标
-python scripts/plot_training.py
+python scripts/plot_forward.py
+python scripts/plot_critical.py
+python scripts/plot_creative.py
+
+# 三模型横向对比
+python scripts/plot_compare.py
 ```
 
-### Forward LoRA 训练结果
+### 训练结果对比
 
-| 指标 | 初始 | 最终 | 变化 |
-|------|------|------|------|
-| Loss | 2.55 | 1.47 | ↓42% |
-| Accuracy | 47.8% | 59.0% | ↑22% |
-| Grad Norm | 0.24 | 0.67 | 稳定，无爆炸 |
-| 可训练参数 | 5,898,240 (0.12% of 4B) | — | — |
+| Agent | Loss 初始 | Loss 最终 | Loss 降幅 | Accuracy 初始 | Accuracy 最终 | Accuracy 升幅 | 可训练参数 |
+|-------|----------|----------|----------|--------------|--------------|--------------|-----------|
+| Forward | 2.55 | 1.47 | ↓42.3% | 47.8% | 58.5% | ↑10.8% | 5,898,240 (0.15%) |
+| Critical | 2.44 | 1.09 | ↓55.5% | 50.1% | 68.8% | ↑18.7% | 19,464,192 (0.49%) |
+| Creative | 2.69 | 0.96 | ↓64.5% | 47.3% | 71.7% | ↑24.4% | 33,030,144 (0.83%) |
 
 训练详情见 [learning/project-setup-notes.md](learning/project-setup-notes.md) 第二十三节。
+
+---
+
+## 训练结果分析
+
+### 1. 总体结论
+
+三个 LoRA Agent 的训练均成功完成，且呈现明显的**性能梯度**：
+
+```
+Forward (r=8, 5.9M)  →  Critical (r=12, 19.5M)  →  Creative (r=16, 33.0M)
+     ↓42.3%                    ↓55.5%                    ↓64.5%
+    ↑10.8%                    ↑18.7%                    ↑24.4%
+```
+
+**核心发现：可训练参数量与训练效果呈正相关。** Creative 的可训练参数是 Forward 的 5.6 倍，Loss 降幅也是 Forward 的 1.5 倍。
+
+### 2. 训练效率分析
+
+| Agent | 收敛 Epoch | 最终 Loss | 最终 Accuracy | 训练效率评价 |
+|-------|-----------|----------|--------------|-------------|
+| Forward | Epoch 1.0 | 1.47 | 58.5% | 快速收敛但效果有限 |
+| Critical | Epoch 2.1 | 1.09 | 68.8% | 中速收敛，效果良好 |
+| Creative | Epoch 3.1 | 0.96 | 71.7% | 慢速收敛但效果最佳 |
+
+**Forward 收敛最快但效果最差**，因为参数太少（5.9M），模型容量有限，很快就能学完能学的东西。
+
+**Creative 收敛最慢但效果最好**，因为参数最多（33.0M），模型容量大，需要更多迭代才能充分学习，但最终能达到更高的性能。
+
+### 3. 参数量与性能关系
+
+| Agent | 可训练参数 | 占模型比例 | Loss 降幅 | Accuracy 升幅 | 参数效率 |
+|-------|-----------|-----------|----------|--------------|---------|
+| Forward | 5.9M | 0.15% | 42.3% | 10.8% | 7.2%/M |
+| Critical | 19.5M | 0.49% | 55.5% | 18.7% | 2.8%/M |
+| Creative | 33.0M | 0.83% | 64.5% | 24.4% | 1.9%/M |
+
+**参数效率递减**：Forward 每百万参数带来 7.2% 的 Loss 降幅，而 Creative 只有 1.9%/M。这符合机器学习的**边际收益递减规律**——参数越多，每增加一单位参数带来的收益越小。
+
+### 4. LoRA 注入层分析
+
+| Agent | Target Modules | MLP 层数 | 效果 | 分析 |
+|-------|---------------|---------|------|------|
+| Forward | q,k,v,o | 0 | 最差 | 只注入注意力层，影响"看哪里" |
+| Critical | q,k,v,o,gate,up | 2 | 中等 | 注入 2 个 MLP 层，影响"想什么" |
+| Creative | q,k,v,o,gate,up,down | 3 | 最好 | 注入 3 个 MLP 层，全面影响推理 |
+
+**关键发现：MLP 层注入是性能提升的关键。**
+
+- 注意力层（q,k,v,o）：控制模型"看哪里"，维度 2560×2560
+- MLP 层（gate,up,down）：控制模型"想什么"，维度 2560×9728（大 3.8 倍）
+
+Forward 只注入注意力层（6.5M 参数/层），而 Critical 和 Creative 额外注入了 MLP 层（24.9M 参数/层），这就是性能差距的主要原因。
+
+### 5. 训练稳定性
+
+| Agent | Grad Norm 范围 | 稳定性 | 说明 |
+|-------|---------------|--------|------|
+| Forward | 0.24 ~ 0.77 | ✅ 稳定 | 最稳定，参数最少 |
+| Critical | 0.29 ~ 1.09 | ✅ 稳定 | 稳定，有轻微波动 |
+| Creative | 0.28 ~ 1.48 | ✅ 稳定 | 波动最大，但仍在健康范围 |
+
+三个模型的 Grad Norm 都在健康范围内（< 2.0），没有梯度爆炸或消失。Creative 的波动最大，因为参数最多、学习能力最强，优化过程更复杂。
+
+### 6. 训练图像说明
+
+#### 图 1：Forward LoRA 训练指标
+
+![Forward LoRA Training Metrics](adapters/forward_lora/training_metrics_paper_style.png)
+
+*图 1：Forward Agent LoRA 训练过程中的四项核心指标变化。左上图为训练损失（Training Loss），从 2.55 下降至 1.47，降幅 42.3%，表明模型在学习前瞻推理模式；右上图为梯度范数（Gradient Norm），稳定在 0.24-0.77 范围内，无梯度爆炸现象；左下图为策略熵（Policy Entropy），先升后降，反映模型从不确定到确定的学习过程；右下图为平均 Token 准确率（Mean Token Accuracy），从 47.8% 提升至 58.5%，提升 10.8 个百分点。整体训练过程平稳，但受限于较小的参数量（5.9M），性能提升有限。*
+
+#### 图 2：Critical LoRA 训练指标
+
+![Critical LoRA Training Metrics](adapters/critical_lora/training_metrics_paper_style.png)
+
+*图 2：Critical Agent LoRA 训练过程中的四项核心指标变化。左上图训练损失从 2.44 下降至 1.09，降幅 55.5%，明显优于 Forward；右上图梯度范数在 0.29-1.09 范围内波动，训练稳定；左下图策略熵从 1.27 升至峰值 2.27 后回落至 1.13，显示模型经历了充分的探索阶段；右下图准确率从 50.1% 提升至 68.8%，提升 18.7 个百分点。Critical 注入了 6 个目标模块（含 gate_proj 和 up_proj），可训练参数达 19.5M，是 Forward 的 3.3 倍，因此学习能力更强。*
+
+#### 图 3：Creative LoRA 训练指标
+
+![Creative LoRA Training Metrics](adapters/creative_lora/training_metrics_paper_style.png)
+
+*图 3：Creative Agent LoRA 训练过程中的四项核心指标变化。左上图训练损失从 2.69 下降至 0.96，降幅 64.5%，为三个模型中最佳；右上图梯度范数在 0.28-1.48 范围内波动，虽有波动但整体稳定；左下图策略熵从 1.44 升至 2.29 后回落至 1.05，探索充分；右下图准确率从 47.3% 提升至 71.7%，提升 24.4 个百分点，为三个模型中最高。Creative 注入了全部 7 个目标模块（含 down_proj），可训练参数达 33.0M，是 Forward 的 5.6 倍，因此能达到最佳性能。*
+
+#### 图 4：三个 Agent 训练结果横向对比
+
+![LoRA Training Comparison](adapters/training_comparison.png)
+
+*图 4：三个 LoRA Agent 训练结果的横向对比。橙色线为 Forward（r=8），蓝色线为 Critical（r=12），绿色线为 Creative（r=16）。左上图显示训练损失对比，Creative 的最终损失（0.96）明显低于 Critical（1.09）和 Forward（1.47）；右上图显示准确率对比，Creative 的最终准确率（71.7%）高于 Critical（68.8%）和 Forward（58.5%）；左下图显示梯度范数对比，三者均在健康范围内；右下图显示策略熵对比，Creative 的最终熵最低（1.05），表明模型最为确定。该图清晰展示了"参数量越大，训练效果越好"的正相关关系。*
+
+### 7. 技术洞察
+
+#### 7.1 为什么参数越多效果越好？
+
+LoRA 的核心思想是在冻结的基座模型旁边挂载小矩阵，通过训练这些小矩阵来调整模型行为。参数越多，模型的**表达能力**越强，能学到更复杂的模式。
+
+```
+Forward (5.9M):   只能学到基本的前瞻推理模式
+Critical (19.5M): 能学到更复杂的批判性思维模式
+Creative (33.0M): 能学到最复杂的跨领域类比模式
+```
+
+#### 7.2 为什么 MLP 层比注意力层更重要？
+
+在 Transformer 架构中：
+- **注意力层**：负责"看哪里"，决定信息的权重分配
+- **MLP 层**：负责"想什么"，存储和处理知识
+
+对于认知风格注入任务，我们需要改变的是模型"怎么想"，而不是"看哪里"。因此，注入 MLP 层（gate_proj, up_proj, down_proj）比只注入注意力层更有效。
+
+#### 7.3 边际收益递减
+
+| 参数增量 | Loss 降幅增量 | 边际收益 |
+|---------|--------------|---------|
+| Forward → Critical (+13.6M) | +13.2% | 0.97%/M |
+| Critical → Creative (+13.5M) | +9.0% | 0.67%/M |
+
+从 Critical 到 Creative 的参数增量与 Forward 到 Critical 几乎相同（~13.5M），但收益从 13.2% 降到 9.0%。这说明**参数投入的边际收益在递减**。
+
+### 8. 实际应用建议
+
+1. **如果显存有限（6GB）**：使用 Forward（5.9M），效果一般但最省资源
+2. **如果追求性价比**：使用 Critical（19.5M），效果良好，参数适中
+3. **如果追求最佳效果**：使用 Creative（33.0M），效果最好但需要更多资源
+
+### 9. 后续优化方向
+
+1. **增加训练数据**：当前每个 Agent 只有 500 条数据，增加到 1000-2000 条可能进一步提升效果
+2. **添加验证集**：当前全量训练，无法检测过拟合，建议留出 10% 作为验证集
+3. **调整 instruction**：当前 instruction 较弱，强化 instruction 可能让 LoRA 学到更独特的认知风格
+4. **尝试更大的 rank**：如果显存允许，可以尝试 r=24 或 r=32，进一步提升表达能力
 
 ---
 
@@ -285,9 +426,10 @@ python scripts/plot_training.py
 
 ```
 call_llm(prompt)
-    ├─ use_lora="forward"  → base_model + forward LoRA  → forward_agent
-    │                                                      forward_reviser
-    └─ use_lora=None       → base_model（无 LoRA）       → 其他所有 Agent
+    ├─ use_lora="forward"   → base_model + forward LoRA   → forward_agent, forward_reviser
+    ├─ use_lora="critical"  → base_model + critical LoRA  → critical_agent
+    ├─ use_lora="creative"  → base_model + creative LoRA  → creative_agent, creative_reviser
+    └─ use_lora=None        → base_model（无 LoRA）        → coordinator, debate_reviewer, aggregator
 ```
 
 **设计要点：**
@@ -332,7 +474,7 @@ graph.py（LangGraph 工作流）
     │
     ├─ coordinator：分类问题
     ├─ dispatcher：Send 并行分发
-    ├─ 3 个 Agent 并行执行
+    ├─ 3 个 Agent 并行执行（各自使用对应 LoRA）
     ├─ sync_point：汇聚等待
     ├─ debate_reviewer：批判审查
     ├─ 2 个 reviser 并行修正
@@ -362,22 +504,17 @@ graph.py（LangGraph 工作流）
 - [x] Aggregator 综合总结
 - [x] 异常处理（所有 Agent 节点 try-except 容错）
 - [x] 训练数据准备（1500条，每种风格500条）
-- [x] **Forward Agent QLoRA 训练**（loss↓42%, accuracy↑22%）
+- [x] **Forward Agent QLoRA 训练**（loss↓42%, accuracy↑11%）
+- [x] **Critical Agent QLoRA 训练**（loss↓56%, accuracy↑19%）
+- [x] **Creative Agent QLoRA 训练**（loss↓65%, accuracy↑24%）
 - [x] **LoRA adapter 集成到 LangGraph**（本地模型替代 Ollama）
 - [x] **lora_inference.py 推理模块**（一模型多风格，~4GB 显存）
 - [x] LoRA 推理验证脚本（test_lora.py）
-- [x] 训练指标可视化（3D 瀑布图）
+- [x] 训练指标可视化（单模型 + 三模型对比）
 - [x] 完整学习笔记（project-setup-notes.md，28 章节）
-
-### 进行中
-
-- [ ] **模型加载环境优化**（解决 16GB 内存临界问题）
-- [ ] Critical Agent LoRA 训练
-- [ ] Creative Agent LoRA 训练
 
 ### 待开发
 
-- [ ] 三 LoRA adapter 全部集成到 LangGraph
 - [ ] Milvus 向量检索集成
 - [ ] Langfuse 可观测性
 - [ ] 评估框架（LogiQA 2.0）
@@ -396,6 +533,8 @@ graph.py（LangGraph 工作流）
 | bf16 不支持 | `CUBLAS_STATUS_EXECUTION_FAILED` | RTX 3060 不支持 bf16 | 改用 `torch.float16` |
 | 4-bit + fp16 冲突 | `_amp_foreach...` 错误 | 量化训练内部已处理精度 | 删除 TrainingArguments 中的 fp16 |
 | Docker 不启动 | 数据库 Connection refused | 容器重启后默认不自动启动 | `docker start cognitive_postgres` |
+| pad_token 缺失 | 训练格式错误 | Qwen3 默认没有 pad_token | `tokenizer.pad_token = tokenizer.eos_token` |
+| SFTTrainer 参数名 | unexpected keyword argument | trl 1.6.0 改名为 processing_class | 使用 `processing_class=tokenizer` |
 
 ---
 

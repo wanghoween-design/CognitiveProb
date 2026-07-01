@@ -1,5 +1,5 @@
 """
-验证 Forward LoRA 是否真的改变了模型的推理风格
+验证 Critical LoRA 是否真的改变了模型的推理风格
 用法: python scripts/test_lora.py
 """
 import torch
@@ -13,13 +13,13 @@ from peft import PeftModel
 
 # ==================== 配置 ====================
 MODEL_PATH = r".\models\qwen3-4b\Qwen\Qwen3-4B"
-ADAPTER_PATH = r".\adapters\forward_lora"
+ADAPTER_PATH = r".\adapters\critical_lora"
 
-# 测试题目：3 道典型的前瞻推理题
+# 测试题目：3 道典型的批判推理题
 TEST_QUESTIONS = [
-    "如果全球主要国家在2030年前全面禁止燃油车，预测这对汽车行业和就业市场会产生哪些连锁影响？请从短期、中期、长期三个维度分析。",
-    "假设量子计算在未来五年内实用化，预测这将如何改变网络安全行业。请分阶段推理。",
-    "如果远程办公成为永久常态，分析这对城市规划和房地产市场的长期影响。",
+    "有人说'人工智能会取代所有人类工作'，请分析这个论断中的逻辑漏洞和潜在错误。",
+    "有人主张'应该全面禁止社交媒体以保护青少年心理健康'，请质疑这个假设并找出反例。",
+    "有人说'死刑能有效震慑犯罪'，请从逻辑和证据角度分析这个观点的问题。",
 ]
 
 # ==================== 加载模型 ====================
@@ -40,14 +40,14 @@ base_model = AutoModelForCausalLM.from_pretrained(
     low_cpu_mem_usage=True,
 )
 
-print("加载 Forward LoRA adapter...")
+print("加载 Critical LoRA adapter...")
 lora_model = PeftModel.from_pretrained(base_model, ADAPTER_PATH)
 # 注意：4-bit 量化模型不能 merge_and_unload，直接用 PeftModel 推理即可
 
 # ==================== 推理函数 ====================
 def generate(model, question: str, max_new_tokens: int = 512) -> str:
     prompt = f"""<|im_start|>user
-你是一个forward推理专家。请按照指定的推理风格回答。
+你是一个critical推理专家。请按照指定的推理风格回答。
 {question}
 <|im_end|>
 <|im_start|>assistant
@@ -82,7 +82,7 @@ for i, question in enumerate(TEST_QUESTIONS, 1):
     # if len(base_answer) > 400:
     #     print("...(截断)")
 
-    print("\n【有 LoRA — Forward Agent 回答】")
+    print("\n【有 LoRA — Critical Agent 回答】")
     lora_answer = generate(lora_model, question)
     print(lora_answer[:])
     # if len(lora_answer) > 400:
@@ -92,7 +92,7 @@ for i, question in enumerate(TEST_QUESTIONS, 1):
 
 print("=" * 80)
 print("对比完成。观察要点：")
-print("  1. LoRA 回答是否更倾向于 短期→中期→长期 的因果链推理？")
-print("  2. LoRA 回答是否更结构化（分步骤/阶段）？")
-print("  3. LoRA 回答是否更有'最终分析'式的总结句？")
+print("  1. LoRA 回答是否更倾向于找逻辑漏洞和反例？")
+print("  2. LoRA 回答是否更质疑假设、识别谬误？")
+print("  3. LoRA 回答是否更有批判性分析的结构？")
 print("  4. 如果以上 3 点有明显差异，说明 LoRA 认知注入成功 ✅")

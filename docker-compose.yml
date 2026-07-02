@@ -22,6 +22,31 @@ services:
     volumes:
       - redis_data:/data
 
+  # ====== CognitiveProbe 主服务 ======
+  cognitiveprobe:
+    build: .
+    container_name: cognitiveprobe
+    ports:
+      - "8000:8000"    # FastAPI
+      - "8501:8501"    # Streamlit
+    volumes:
+      - ./models:/app/models           # 模型目录（需要预先下载）
+      - ./adapters_4090:/app/adapters_4090  # 4090 训练的 adapter
+      - ./data:/app/data               # 训练数据
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - COGNITIVEPROBE_MOCK_LLM=0     # 0=正常模式，1=mock模式
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - postgres
+      - redis
+
 volumes:
   postgres_data:
   redis_data:

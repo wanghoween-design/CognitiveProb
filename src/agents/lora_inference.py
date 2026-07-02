@@ -15,6 +15,7 @@
   answer = generate_base(prompt)           # 基座模型（无 LoRA）
   answer = generate_lora(prompt, "forward") # 基座 + forward LoRA
 """
+import os
 import torch
 from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
@@ -29,6 +30,15 @@ _lora_adapters = set()   # 已加载的 adapter 名称集合
 # ==================== 路径配置 ====================
 MODEL_PATH = r".\models\qwen3-4b\Qwen\Qwen3-4B"
 ADAPTER_DIR = Path(__file__).parent.parent.parent / "adapters_4090"
+
+
+def _mock_enabled() -> bool:
+    return os.getenv("COGNITIVEPROBE_MOCK_LLM", "0") == "1"
+
+
+def _mock_response(prompt: str, adapter_name: str = "base") -> str:
+    compact_prompt = " ".join(prompt.split())[:80]
+    return f"[mock:{adapter_name}] {compact_prompt}"
 
 
 def _ensure_base_loaded():
@@ -213,6 +223,9 @@ def _generate(model, prompt: str, max_new_tokens: int = 512) -> str:
 
 
 def generate_lora(prompt: str, adapter_name: str, max_new_tokens: int = 400) -> str:
+    if _mock_enabled():
+        return _mock_response(prompt, adapter_name)
+
     """
     使用指定的 LoRA adapter 生成回答
 
@@ -226,6 +239,9 @@ def generate_lora(prompt: str, adapter_name: str, max_new_tokens: int = 400) -> 
 
 
 def generate_base(prompt: str, max_new_tokens: int = 300) -> str:
+    if _mock_enabled():
+        return _mock_response(prompt, "base")
+
     """
     使用基座模型（无 LoRA）生成回答
     用于 coordinator、debate_reviewer、aggregator 等
@@ -235,6 +251,10 @@ def generate_base(prompt: str, max_new_tokens: int = 300) -> str:
 
 
 def preload():
+    if _mock_enabled():
+        print("[LoRA推理] mock 模式：跳过模型和 adapter 预加载")
+        return
+
     """
     预加载基座模型和所有 LoRA adapters（FastAPI 启动时调用）
 

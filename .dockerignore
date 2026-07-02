@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+.venv
+venv
+
+# IDE
+.vscode
+.idea
+
+# 模型和 adapter（通过 volume 挂载，不打包到镜像）
+models/
+adapters/
+adapters_4090/
+
+# 训练产出
+*.tar.gz
+output/
+checkpoint/
+
+# 学习笔记和文档
+learning/
+_docs/
+*.md
+!README.md
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 测试文件
+test_*.py

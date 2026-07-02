@@ -146,16 +146,23 @@ Multi-Agent/
 │   ├── train_forward.py             # Forward LoRA 训练
 │   ├── train_critical.py            # Critical LoRA 训练
 │   ├── train_creative.py            # Creative LoRA 训练
+│   ├── train_all.py                 # 接力训练（Forward→Critical→Creative）
 │   ├── test_lora.py                 # LoRA 推理验证
 │   ├── plot_forward.py              # Forward 训练指标可视化
 │   ├── plot_critical.py             # Critical 训练指标可视化
 │   ├── plot_creative.py             # Creative 训练指标可视化
 │   ├── plot_compare.py              # 三模型横向对比
+│   ├── app.py                       # Streamlit 前端界面
+│   ├── autodl_deploy.sh             # AutoDL 部署脚本
+│   ├── autodl_upload.ps1            # AutoDL 上传脚本（Windows）
 │   └── debug_uvicorn.py             # 最小复现调试脚本
 ├── learning/                        # 学习笔记
 │   ├── project-setup-notes.md       # 项目搭建笔记（28 章节）
 │   └── error-notes.md               # 错误记录
-├── docker-compose.yml               # PostgreSQL + Redis
+├── Dockerfile                       # Docker 镜像定义
+├── docker-compose.yml               # Docker 服务编排
+├── docker-entrypoint.sh             # Docker 启动脚本
+├── .dockerignore                    # Docker 忽略文件
 ├── requirements.txt                 # Python 依赖
 └── README.md
 ```
@@ -180,6 +187,7 @@ Multi-Agent/
 
 ```json
 {
+  "task_id": 1,
   "question": "如果中国全面推行四天工作制，会带来什么影响？",
   "question_type": "complex_reasoning",
   "forward": "<reasoning>\n步骤1：短期影响（1-3年）...\n步骤2：中期影响（4-10年）...\n</reasoning>\n最终分析：...",
@@ -191,6 +199,8 @@ Multi-Agent/
   "final": "综合三个视角：四天工作制应分行业渐进推行..."
 }
 ```
+
+**注意：** /reason 推理结果会自动存入 PostgreSQL 数据库，可通过 `/tasks/{task_id}` 查询历史记录。
 
 ---
 
@@ -236,6 +246,48 @@ uvicorn src.main:app --host 127.0.0.1 --port 8000
 [LoRA推理] 预加载完成，所有 adapter 就绪
 INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
+
+### Mock 模式（开发调试）
+
+Mock 模式允许在不加载模型的情况下运行系统，用于快速开发和调试前端。
+
+```bash
+# 启用 Mock 模式
+set COGNITIVEPROBE_MOCK_LLM=1    # Windows
+export COGNITIVEPROBE_MOCK_LLM=1 # Linux/Mac
+
+# 启动服务（无需 GPU，秒开）
+uvicorn src.main:app --host 127.0.0.1 --port 8000
+
+# 关闭 Mock 模式
+set COGNITIVEPROBE_MOCK_LLM=0
+```
+
+### Docker 一键部署
+
+```bash
+# 1. 下载模型（只需一次）
+python -c "
+from modelscope import snapshot_download
+snapshot_download('Qwen/Qwen3-4B', cache_dir='./models/qwen3-4b')
+"
+
+# 2. 启动所有服务
+docker compose up -d
+
+# 3. 访问服务
+# FastAPI:   http://localhost:8000
+# Streamlit: http://localhost:8501
+```
+
+**Docker 服务端口：**
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| FastAPI | 8000 | API 接口 |
+| Streamlit | 8501 | 前端界面 |
+| PostgreSQL | 5432 | 数据库 |
+| Redis | 6379 | 缓存 |
 
 ---
 

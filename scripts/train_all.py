@@ -26,10 +26,9 @@ def run_training(name, script_path):
 
     start_time = time.time()
 
-    # 运行训练脚本
     result = subprocess.run(
         [sys.executable, script_path],
-        cwd=str(Path(__file__).parent.parent),  # 项目根目录
+        cwd=str(Path(__file__).parent.parent),
     )
 
     elapsed = time.time() - start_time
@@ -50,6 +49,7 @@ def main():
     print("=" * 60)
     print(f"开始时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"预计总耗时: 2-4 小时")
+    print()
 
     total_start = time.time()
     results = []
@@ -66,10 +66,15 @@ def main():
         # 如果失败，询问是否继续
         if returncode != 0:
             print(f"\n⚠️ {name} 失败，是否继续训练下一个？")
-            response = input("输入 y 继续，其他任意键退出: ")
-            if response.lower() != 'y':
-                print("训练中止")
-                break
+            try:
+                response = input("输入 y 继续，其他任意键退出: ")
+                if response.lower() != 'y':
+                    print("训练中止")
+                    break
+            except EOFError:
+                # 无交互环境，自动继续
+                print("无交互环境，自动继续下一个")
+                continue
 
     # 汇总
     total_elapsed = time.time() - total_start

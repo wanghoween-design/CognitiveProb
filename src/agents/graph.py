@@ -37,32 +37,52 @@ def call_llm(prompt: str, use_lora: str = None) -> str:
 
 
 def coordinator(state: AgentState) -> dict:
-    """Coordinator：判断问题类型，决定调用哪些 Agent"""
+    """Coordinator：判断问题类型，决定调用哪些 Agent（JSON 输出 + 容错版）"""
     question = state["question"]
-    prompt = f"""你是一个问题分类专家。请判断以下问题属于哪种类型，只输出类型编号，不要输出其他内容。
+
+    # 1. 快速规则兜底：极简问候直接拦截，节省一次 LLM 调用
+    bare_greetings = {"你好", "嗨", "早上好", "晚上好", "你是谁", "谢谢", "再见"}
+    if question.strip() in bare_greetings:
+        return {"question_type": "simple_greeting"}
+
+    # 2. 用强约束 prompt 让 LLM 只输出 JSON
+    prompt = f"""请判断以下问题属于哪种类型。你必须**只输出一个 JSON 对象**，不要添加任何解释或多余文字。
+
+JSON 格式：{{"type": 数字}}
+
+数字定义：
+1 = simple_greeting    （仅问候，无实质问题）
+2 = simple_factual     （有唯一明确答案的客观事实，无需分析）
+3 = complex_reasoning  （需要分析、讨论、评价、建议，含“该不该”“利弊”“比较”等）
 
 问题：{question}
 
-类型编号：
-1. simple_greeting — 简单问候（如"你好"、"你是谁"、"早上好"）
-2. simple_factual — 简单事实问题（如"地球到月球多远"、"Python是什么"）
-3. complex_reasoning — 复杂推理问题（需要多角度分析，如"如果太阳消失了会怎样"、"该不该实行四天工作制"）
+JSON："""
 
-只输出数字 1、2 或 3。"""
     result = call_llm(prompt).strip()
 
-    # 提取数字
-    match = re.search(r"[123]", result)
-    question_type = match.group() if match else "3"  # 默认复杂问题
+    # 3. 解析 JSON（带多层容错）
+    q_type_num = 3   # 默认复杂问题，确保安全
+    try:
+        # 尝试找到第一个 { 和最后一个 }，截取 JSON 段
+        start = result.find('{')
+        end = result.rfind('}')
+        if start != -1 and end != -1:
+            json_str = result[start:end+1]
+            data = json.loads(json_str)
+            q_type_num = int(data.get("type", 3))
+    except Exception:
+        # JSON 解析失败时，回退到取最后一个出现的独立数字 1/2/3
+        numbers = re.findall(r'\b([123])\b', result)
+        if numbers:
+            q_type_num = int(numbers[-1])
 
-    type_map = {
-        "1": "simple_greeting",
-        "2": "simple_factual",
-        "3": "complex_reasoning"
-    }
-    q_type = type_map.get(question_type, "complex_reasoning")
+    # 限制范围
+    if q_type_num not in (1, 2, 3):
+        q_type_num = 3
 
-    return {"question_type": q_type}
+    type_map = {1: "simple_greeting", 2: "simple_factual", 3: "complex_reasoning"}
+    return {"question_type": type_map[q_type_num]}
 
 
 def dispatcher(state: AgentState) -> list[Send]:

@@ -29,28 +29,35 @@ with open(LOG_PATH, "r", encoding="utf-8") as f:
 
 epochs = np.array([log["epoch"] for log in logs], dtype=float)
 
+def get_metric_value(log, keys):
+    """从日志中获取指标值，兼容不同的 key 名称"""
+    for key in keys:
+        if key in log:
+            return log[key]
+    return 0
+
 metrics = {
     "Training Loss": {
         "key": "loss",
-        "values": np.array([log["loss"] for log in logs], dtype=float),
+        "values": np.array([get_metric_value(log, ["loss", "train_loss"]) for log in logs], dtype=float),
         "ylabel": "Loss",
         "higher_is_better": False,
     },
     "Gradient Norm": {
         "key": "grad_norm",
-        "values": np.array([log["grad_norm"] for log in logs], dtype=float),
+        "values": np.array([get_metric_value(log, ["grad_norm"]) for log in logs], dtype=float),
         "ylabel": "Grad. Norm",
         "higher_is_better": None,
     },
     "Policy Entropy": {
         "key": "entropy",
-        "values": np.array([log["entropy"] for log in logs], dtype=float),
+        "values": np.array([get_metric_value(log, ["entropy"]) for log in logs], dtype=float),
         "ylabel": "Entropy",
         "higher_is_better": None,
     },
     "Mean Token Accuracy": {
         "key": "mean_token_accuracy",
-        "values": np.array([log["mean_token_accuracy"] for log in logs], dtype=float),
+        "values": np.array([get_metric_value(log, ["mean_token_accuracy"]) for log in logs], dtype=float),
         "ylabel": "Accuracy",
         "higher_is_better": True,
     },

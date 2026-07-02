@@ -111,13 +111,21 @@ COLORS = {
     "Creative (r=16)": "#009E73",  # 绿色
 }
 
-# 四个指标
+# 四个指标（兼容两种 key 名称）
 METRICS = [
-    ("Training Loss", "loss", "Loss", False),
-    ("Mean Token Accuracy", "mean_token_accuracy", "Accuracy", True),
-    ("Gradient Norm", "grad_norm", "Grad. Norm", None),
-    ("Policy Entropy", "entropy", "Entropy", None),
+    ("Training Loss", ["loss", "train_loss"], "Loss", False),
+    ("Mean Token Accuracy", ["mean_token_accuracy"], "Accuracy", True),
+    ("Gradient Norm", ["grad_norm"], "Grad. Norm", None),
+    ("Policy Entropy", ["entropy"], "Entropy", None),
 ]
+
+
+def get_metric_value(log, keys):
+    """从日志中获取指标值，兼容不同的 key 名称"""
+    for key in keys:
+        if key in log:
+            return log[key]
+    return None
 
 
 # ==================== 工具函数 ====================
@@ -145,12 +153,12 @@ def smart_formatter(x, pos):
 fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 axes = axes.flatten()
 
-for idx, (title, key, ylabel, higher_is_better) in enumerate(METRICS):
+for idx, (title, keys, ylabel, higher_is_better) in enumerate(METRICS):
     ax = axes[idx]
 
     for name, logs in all_logs.items():
         epochs = np.array([log["epoch"] for log in logs], dtype=float)
-        values = np.array([log[key] for log in logs], dtype=float)
+        values = np.array([get_metric_value(log, keys) for log in logs], dtype=float)
         smooth_values = moving_average(values, window=3)
 
         color = COLORS[name]

@@ -28,7 +28,7 @@ _lora_adapters = set()   # 已加载的 adapter 名称集合
 
 # ==================== 路径配置 ====================
 MODEL_PATH = r".\models\qwen3-4b\Qwen\Qwen3-4B"
-ADAPTER_DIR = Path(__file__).parent.parent.parent / "adapters"
+ADAPTER_DIR = Path(__file__).parent.parent.parent / "adapters_4090"
 
 
 def _ensure_base_loaded():
@@ -130,10 +130,13 @@ def _clean_output(text: str) -> str:
     for line in lines:
         stripped = line.strip()
         # 跳过元指令
-        if re.match(r'^(请用|跳出|回归到问题|按照指定|答案简评|现在应用)', stripped):
+        if re.match(r'^(请用|跳出|回归到问题|按照指定|答案简评|现在应用|修改润色|最后检查|确保|分析这两个)', stripped):
             continue
         # 跳过纯"答案"行
-        if stripped in ['答案', '回答', '答案：', '回答：']:
+        if stripped in ['答案', '回答', '答案：', '回答：', '---']:
+            continue
+        # 跳过步骤说明行
+        if re.match(r'^步骤[说明]*[：:]', stripped):
             continue
         cleaned_lines.append(line)
 

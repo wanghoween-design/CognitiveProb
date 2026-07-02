@@ -10,23 +10,25 @@ __pycache__/
 #训练产出
 output/
 checkpoint/
-*.safetensors                  # 忽略模型权重文件
-!adapters/*/adapter_model.safetensors   # 但保留 LoRA adapter 权重
+*.safetensors                  # 忽略所有模型权重文件
 
-# adapter 训练中间产物（不提交）
-adapters/*/checkpoint-*/
-adapters/*/optimizer.pt
-adapters/*/rng_state.pth
-adapters/*/scheduler.pt
-adapters/*/trainer_state.json
-adapters/*/training_args.bin
-adapters/*/tokenizer.json
-adapters/*/tokenizer_config.json
-adapters/*/chat_template.jinja
-adapters/*/README.md
-adapters/*/training_waterfall.png
-adapters/*/training_metrics_paper_style.png
-adapters/*/training_metrics_paper_style.pdf
+# adapter 文件（太大，不提交 Git）
+adapters/
+adapters_4090/
+
+#系统文件
+.DS_Store
+Thumbs.db
+
+#其他文件及文件夹
+_docs/
+.claude/
+CodeGuard/
+CognitiveProbe/
+learning/
+test_docker.py
+models
+data
 
 #系统文件
 .DS_Store

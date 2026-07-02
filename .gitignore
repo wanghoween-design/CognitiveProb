@@ -43,3 +43,5 @@ learning/
 test_docker.py
 models
 data
+project.tar.gz
+data_adapters_4090.tar.gz

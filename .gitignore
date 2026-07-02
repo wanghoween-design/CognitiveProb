@@ -14,6 +14,9 @@ checkpoint/
 
 # adapter 文件（太大，不提交 Git）
 adapters/
+adapters_4090/
+!adapters_4090/**/*.png        # 允许 PNG 图片
+!adapters_4090/**/*.pdf        # 允许 PDF 文件
 
 
 #系统文件

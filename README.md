@@ -8,60 +8,9 @@
 
 ## 系统架构
 
-```
-用户提问
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│           Coordinator Agent             │
-│     判断问题类型，决定调用哪些 Agent      │
-└────────────────┬────────────────────────┘
-                 │
-    ┌────────────┼────────────┐
-    │            │            │
-    ▼            ▼            ▼
- 简单问候    简单事实问题    复杂推理问题
- (直接回答)  (1个Agent)    (3个Agent并行)
-    │            │            │
-    │            ▼            ▼
-    │     ┌──────────┐  ┌─────────────────────┐
-    │     │ 批判 Agent│  │ 前瞻/批判/创造 Agent │
-    │     └────┬─────┘  │   三个并行执行       │
-    │          │        └────────┬────────────┘
-    │          │                 │
-    │          │                 ▼
-    │          │        ┌─────────────────┐
-    │          │        │  sync_point     │
-    │          │        │  汇聚等待        │
-    │          │        └────────┬────────┘
-    │          │                 │
-    │          │                 ▼
-    │          │        ┌─────────────────┐
-    │          │        │ debate_reviewer  │
-    │          │        │ 批判审查其他分析  │
-    │          │        └────────┬────────┘
-    │          │                 │
-    │          │                 ▼
-    │          │     ┌───────────────────────┐
-    │          │     │ forward_reviser       │
-    │          │     │ creative_reviser      │
-    │          │     │ 两个并行修正          │
-    │          │     └───────────┬───────────┘
-    │          │                 │
-    │          │                 ▼
-    │          │        ┌─────────────────┐
-    │          │        │  sync_point_2   │
-    │          │        └────────┬────────┘
-    │          │                 │
-    ▼          ▼                 ▼
-┌─────────────────────────────────────────┐
-│            汇总 Agent                    │
-│   综合所有分析，提取共识与分歧，写总结    │
-└─────────────────────────────────────────┘
-                 │
-                 ▼
-            最终回答
-```
+![系统流程图：基于 LangGraph 的多智能体推理工作流](docs/system_flow.png)
+
+*全链路分四个阶段：**输入**（用户提问，POST /reason）→ **协调与路由**（Coordinator 判断问题类型，输出 question_type）→ **智能体推理路径**（按类型走三条路由：简单问候直答 / 简单事实单 Agent / 复杂推理三 Agent 并行）→ **聚合与输出**（同步汇聚、辩论审查、并行修正、Aggregator 综合生成最终 JSON）。*
 
 ### 三个 Agent 的认知分工
 
@@ -97,15 +46,16 @@ Round 3: 前瞻和创造 Agent 根据质疑修正自己的观点（并行）
 
 | 组件 | 技术 | 用途 |
 |------|------|------|
-| API 框架 | FastAPI | REST API 接口 |
-| Agent 编排 | LangGraph | 多 Agent 工作流状态图 |
-| 基座模型 | Qwen3-4B（本地 HF 格式） | 本地 LLM 推理引擎 |
+| API 框架 | FastAPI | REST API 接口（含 NDJSON 流式端点） |
+| Agent 编排 | LangGraph | 多 Agent 工作流状态图（Send 并行 + sync 汇聚） |
+| 基座模型 | Qwen3-4B（本地 HF 格式） | 本地 LLM 推理引擎，一模型挂多 adapter |
+| 前端 | Streamlit | 深色推理控制台 + 链路图实时点亮 |
 | 训练框架 | PEFT + QLoRA + SFTTrainer | LoRA 认知注入训练 |
 | 量化 | bitsandbytes (4-bit NF4) | 省显存，适配消费级显卡 |
-| 数据库 | PostgreSQL 16 | 任务持久化存储 |
-| 缓存 | Redis 7 | 缓存（待集成） |
+| 数据库 | PostgreSQL 16 | 任务持久化存储（含完整推理结果 JSON） |
+| 缓存 | Redis 7 | 已部署，预留（代码未接入） |
 | ORM | SQLAlchemy | 数据库操作 |
-| 容器化 | Docker Compose | 服务编排 |
+| 容器化 | Docker Compose | 服务编排（PostgreSQL + Redis + 主服务） |
 
 ---
 
@@ -136,12 +86,12 @@ Multi-Agent/
 │   ├── critical_train.json          # 批判推理（324条）
 │   └── creative_train.json          # 创造推理（353条）
 ├── models/                          # 基座模型（Qwen3-4B，不提交 Git）
-├── adapters/                        # 已训练的 LoRA adapter（不提交 Git，需自行训练）
+├── adapters/                        # 本地训练的 LoRA adapter（不提交 Git，历史产物）
+├── adapters_4090/                   # RTX 4090 云训练的 LoRA adapter（推理实际使用的目录）
 │   ├── forward_lora/                # Forward Agent（r=8, 5.9M 参数）
 │   ├── critical_lora/               # Critical Agent（r=12, 19.5M 参数）
 │   ├── creative_lora/               # Creative Agent（r=16, 33.0M 参数）
-│   ├── training_comparison.png      # 三模型对比图
-│   └── training_comparison.pdf
+│   └── training_comparison.png      # 三模型对比图
 ├── scripts/                         # 训练 & 工具脚本
 │   ├── train_forward.py             # Forward LoRA 训练
 │   ├── train_critical.py            # Critical LoRA 训练
@@ -152,10 +102,16 @@ Multi-Agent/
 │   ├── plot_critical.py             # Critical 训练指标可视化
 │   ├── plot_creative.py             # Creative 训练指标可视化
 │   ├── plot_compare.py              # 三模型横向对比
-│   ├── app.py                       # Streamlit 前端界面
+│   ├── app.py                       # Streamlit 前端（深色推理控制台 + 链路图点亮）
 │   ├── autodl_deploy.sh             # AutoDL 部署脚本
 │   ├── autodl_upload.ps1            # AutoDL 上传脚本（Windows）
 │   └── debug_uvicorn.py             # 最小复现调试脚本
+├── .streamlit/config.toml           # Streamlit 深色主题配置
+├── docs/                            # 文档资源（流程图、界面截图）
+│   ├── system_flow.png              # 系统全链路流程图
+│   ├── ui_pipeline.png              # 前端完整页面长图（真实模型运行）
+│   └── ui_results.png               # 结果区细节截图
+├── tests/test_lightweight.py        # 轻量测试（Mock LLM，含 API / 持久化用例）
 ├── learning/                        # 学习笔记
 │   ├── project-setup-notes.md       # 项目搭建笔记（28 章节）
 │   └── error-notes.md               # 错误记录
@@ -173,15 +129,19 @@ Multi-Agent/
 
 | 方法 | 路径 | 功能 | 说明 |
 |------|------|------|------|
-| GET | `/health` | 健康检查 | 返回 `{"status": "ok"}` |
+| GET | `/health` | 健康检查 | 返回模型加载 / Mock / 数据库状态 |
 | GET | `/config` | 查看配置 | 返回 config.yaml 内容 |
-| GET | `/test_llm` | LLM 测试 | 测试模型连接 |
-| POST | `/tasks` | 创建任务 | 参数：question |
-| GET | `/tasks/{id}` | 查询任务 | 返回任务详情 |
-| PUT | `/tasks/{id}` | 修改任务 | 参数：question |
+| GET | `/test_llm` | LLM 测试 | 本地基座模型推理自检 |
+| POST | `/tasks` | 创建任务 | JSON body：`{"question": "..."}` |
+| GET | `/tasks` | 任务列表 | `?limit=20`，倒序，历史记录用 |
+| GET | `/tasks/{id}` | 查询任务 | 返回问题、状态和完整推理结果 |
+| PUT | `/tasks/{id}` | 修改任务 | JSON body：`{"question": "..."}` |
 | DELETE | `/tasks/{id}` | 删除任务 | 删除指定任务 |
-| POST | `/ask` | 端到端问答 | 提问→模型回答→存库 |
-| POST | `/reason` | 多 Agent 推理 | Coordinator 路由→辩论→修正→综合 |
+| POST | `/ask` | 端到端问答 | 本地基座模型直答，结果存库 |
+| POST | `/reason` | 多 Agent 推理 | 一次性返回完整结果 |
+| POST | `/reason/stream` | 多 Agent 推理（流式） | NDJSON 逐节点推事件，前端实时点亮流程图 |
+
+> 推荐用 JSON body 传参（旧式 `?question=xxx` query 参数仍然兼容）。
 
 ### /reason 返回示例
 
@@ -200,7 +160,18 @@ Multi-Agent/
 }
 ```
 
-**注意：** /reason 推理结果会自动存入 PostgreSQL 数据库，可通过 `/tasks/{task_id}` 查询历史记录。
+**注意：** /reason 与 /reason/stream 的结果都会存入 PostgreSQL（含完整 JSON），可通过 `/tasks/{task_id}` 查询历史记录；数据库未启动时推理照常进行，只是不留历史。
+
+### /reason/stream 事件格式（NDJSON，每行一个 JSON）
+
+```json
+{"event": "start", "task_id": 1, "question": "..."}
+{"event": "node", "node": "coordinator", "data": {"question_type": "complex_reasoning"}, "ts": 1759500000.0}
+{"event": "node", "node": "forward", "data": {"forward_answer": "..."}, "ts": ...}
+{"event": "end", "data": { "...": "与 /reason 响应结构相同" }}
+```
+
+前端据此实时点亮链路图：节点执行中呼吸发光、完成打勾并显示耗时、未走的路径变暗。
 
 ---
 
@@ -288,6 +259,51 @@ docker compose up -d
 | Streamlit | 8501 | 前端界面 |
 | PostgreSQL | 5432 | 数据库 |
 | Redis | 6379 | 缓存 |
+
+---
+
+## 前端界面（推理控制台）
+
+深色控制台风格 + **全链路流程可视化**。启动方式：
+
+```bash
+streamlit run scripts/app.py
+# 默认请求 http://127.0.0.1:8000，可用环境变量改：
+# set COGNITIVEPROBE_API_URL=http://127.0.0.1:8010
+```
+
+### 核心特性：链路图实时点亮
+
+前端通过 `/reason/stream` 逐节点接收事件，流程图实时反映推理进度：
+
+- **执行中**的节点呼吸发光（青色光圈脉冲）
+- **已完成**的节点打勾并显示该步骤耗时
+- **未走的路径**（其他路由分支）保持暗淡
+- 协调路由完成后显示识别出的问题类型标签
+- 底部状态行 + 进度条实时更新，三个 Agent 的输出**边生成边显示**
+
+```bash
+# 无 GPU 也能体验完整界面（Mock 模式，秒级完成）
+set COGNITIVEPROBE_MOCK_LLM=1
+uvicorn src.main:app --port 8000
+streamlit run scripts/app.py
+```
+
+### 界面预览
+
+![推理控制台 · 全链路流程图（完整页面长图）](docs/ui_pipeline.png)
+
+*真实模型端到端完整页面长图（本地 Qwen3-4B 4-bit + 三个 LoRA adapter，RTX 3060 笔记本）：协调路由识别为"复杂推理"，前瞻/批判/创造 三视角并行 → 汇聚 → 辩论审查 → 并行修正 → 综合汇总 → 最终结论，全链路点亮、每个节点显示该步耗时；下方依次为指标卡、三视角分析、辩论批判审查、观点修正、共识结论与原始 JSON，总耗时 1459.6 秒。*
+
+![结果详情区](docs/ui_results.png)
+
+*三视角分析（各 Agent 独立配色）、辩论批判审查、观点修正、共识结论分区呈现，底部可展开原始 JSON。*
+
+### 其他功能
+
+- **服务状态徽章**：API 在线 / Mock 模式 / 模型加载 / LoRA 数量 / 数据库状态，一眼判断运行环境
+- **示例问题**：侧边栏一键填入
+- **历史记录**：读取数据库最近 8 条任务，点击即回放完整推理结果（需 PostgreSQL 在线）
 
 ---
 
@@ -596,13 +612,11 @@ graph.py（LangGraph 工作流）
 - [x] LoRA 推理验证脚本（test_lora.py）
 - [x] 训练指标可视化（单模型 + 三模型对比）
 - [x] 完整学习笔记（project-setup-notes.md，28 章节）
-
-### 待开发
-
-- [ ] Langfuse 可观测性
-- [ ] 评估框架（LogiQA 2.0）
-- [ ] Streamlit 前端界面
-- [ ] 三角互评（critical 也被质疑）
+- [x] **Streamlit 前端界面**（深色推理控制台 + 全链路流程图实时点亮 + 流式输出）
+- [x] **流式推理接口 /reason/stream**（LangGraph 逐节点事件推送）
+- [x] **推理结果持久化**（Task 表新增 result JSON 列，支持历史回放）
+- [x] **数据库离线优雅降级**（PostgreSQL 未启动时推理照常，接口不崩溃；启动时自动迁移老表）
+- [x] 轻量测试套件（路由解析 / 流式事件 / 任务持久化）
 
 ---
 

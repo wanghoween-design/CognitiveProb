@@ -63,22 +63,31 @@ JSON："""
     result = call_llm(prompt).strip()
 
     # 3. 解析 JSON（带多层容错）
-    q_type_num = 3   # 默认复杂问题，确保安全
+    q_type_num = None
     try:
         # 尝试找到第一个 { 和最后一个 }，截取 JSON 段
         start = result.find('{')
         end = result.rfind('}')
-        if start != -1 and end != -1:
-            json_str = result[start:end+1]
-            data = json.loads(json_str)
+        if start != -1 and end > start:
+            data = json.loads(result[start:end+1])
             q_type_num = int(data.get("type", 3))
     except Exception:
-        # JSON 解析失败时，回退到取最后一个出现的独立数字 1/2/3
+        q_type_num = None
+
+    # 容错 1：模型没用 JSON 但提到了类型关键词（如"这是 complex_reasoning"）
+    if q_type_num is None:
+        for keyword, num in (("complex_reasoning", 3), ("simple_factual", 2), ("simple_greeting", 1)):
+            if keyword in result:
+                q_type_num = num
+                break
+
+    # 容错 2：取最后出现的独立数字 1/2/3
+    if q_type_num is None:
         numbers = re.findall(r'\b([123])\b', result)
         if numbers:
             q_type_num = int(numbers[-1])
 
-    # 限制范围
+    # 都失败时默认复杂问题，确保安全（宁可多调用几个 Agent 也不能漏分析）
     if q_type_num not in (1, 2, 3):
         q_type_num = 3
 

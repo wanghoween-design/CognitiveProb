@@ -28,17 +28,46 @@ _lora_model = None       # PeftModel（包含所有 adapter，动态切换）
 _lora_adapters = set()   # 已加载的 adapter 名称集合
 
 # ==================== 路径配置 ====================
-MODEL_PATH = r".\models\qwen3-4b\Qwen\Qwen3-4B"
-ADAPTER_DIR = Path(__file__).parent.parent.parent / "adapters_4090"
+# 查找顺序：环境变量 > 项目根目录（由本文件位置推导）> 当前工作目录
+# 之前用 r".\models\..." 这种 Windows 相对路径，Linux/Docker 下直接失效
+def _find_model_path() -> str:
+    candidates = [
+        Path(__file__).resolve().parents[2] / "models" / "qwen3-4b" / "Qwen" / "Qwen3-4B",
+        Path.cwd() / "models" / "qwen3-4b" / "Qwen" / "Qwen3-4B",
+        Path("/app/models/qwen3-4b/Qwen/Qwen3-4B"),   # Docker 容器内路径
+    ]
+    for c in candidates:
+        if (c / "config.json").exists():
+            return str(c)
+    return str(candidates[0])   # 都不存在时返回默认值，让加载阶段的报错信息保持可读
+
+MODEL_PATH = os.getenv("COGNITIVEPROBE_MODEL_PATH") or _find_model_path()
+ADAPTER_DIR = Path(
+    os.getenv("COGNITIVEPROBE_ADAPTER_DIR")
+    or (Path(__file__).resolve().parents[2] / "adapters_4090")
+)
 
 
-def _mock_enabled() -> bool:
+def mock_enabled() -> bool:
+    """是否处于 Mock 模式（不加载模型，返回固定假回答，用于前端调试）"""
     return os.getenv("COGNITIVEPROBE_MOCK_LLM", "0") == "1"
 
 
+def is_model_loaded() -> bool:
+    """基座模型是否已加载（供 /health 查询）"""
+    return _base_model is not None
+
+
+def loaded_adapters() -> list[str]:
+    """已加载的 LoRA adapter 列表（供 /health 查询）"""
+    return sorted(_lora_adapters)
+
+
 def _mock_response(prompt: str, adapter_name: str = "base") -> str:
-    compact_prompt = " ".join(prompt.split())[:80]
-    return f"[mock:{adapter_name}] {compact_prompt}"
+    # 回显 prompt 尾部（而不是开头）：开头往往带路由枚举/格式指令，
+    # 会被 coordinator 的数字容错解析误读，导致 mock 模式路由错误
+    compact_prompt = " ".join(prompt.split())[-80:]
+    return f"[mock:{adapter_name}] …{compact_prompt}"
 
 
 def _ensure_base_loaded():
@@ -223,9 +252,6 @@ def _generate(model, prompt: str, max_new_tokens: int = 512) -> str:
 
 
 def generate_lora(prompt: str, adapter_name: str, max_new_tokens: int = 400) -> str:
-    if _mock_enabled():
-        return _mock_response(prompt, adapter_name)
-
     """
     使用指定的 LoRA adapter 生成回答
 
@@ -234,27 +260,26 @@ def generate_lora(prompt: str, adapter_name: str, max_new_tokens: int = 400) -> 
         adapter_name: LoRA adapter 名称（"forward" / "critical" / "creative"）
         max_new_tokens: 最多生成多少 token
     """
+    if mock_enabled():
+        return _mock_response(prompt, adapter_name)
+
     model = get_lora_model(adapter_name)  # 会自动切换到对应 adapter
     return _generate(model, prompt, max_new_tokens)
 
 
 def generate_base(prompt: str, max_new_tokens: int = 300) -> str:
-    if _mock_enabled():
-        return _mock_response(prompt, "base")
-
     """
     使用基座模型（无 LoRA）生成回答
     用于 coordinator、debate_reviewer、aggregator 等
     """
+    if mock_enabled():
+        return _mock_response(prompt, "base")
+
     _ensure_base_loaded()
     return _generate(_base_model, prompt, max_new_tokens)
 
 
 def preload():
-    if _mock_enabled():
-        print("[LoRA推理] mock 模式：跳过模型和 adapter 预加载")
-        return
-
     """
     预加载基座模型和所有 LoRA adapters（FastAPI 启动时调用）
 
@@ -262,6 +287,10 @@ def preload():
     - 如果在请求线程里加载模型，容易出现 CUDA 初始化死锁
     - 启动时在主线程加载完，后续请求直接推理，既快又安全
     """
+    if mock_enabled():
+        print("[LoRA推理] mock 模式：跳过模型和 adapter 预加载")
+        return
+
     print("[LoRA推理] 启动预加载...")
     _ensure_base_loaded()
 

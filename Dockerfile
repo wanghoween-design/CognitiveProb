@@ -40,6 +40,7 @@ COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY configs/ ./configs/
 COPY data/ ./data/
+COPY .streamlit/ ./.streamlit/
 
 # 创建必要目录
 RUN mkdir -p models adapters adapters_4090
